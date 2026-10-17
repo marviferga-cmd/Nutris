@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nutris — Clínica de Nutrição</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icone">🥗</span>
+      <div>
+        <strong>Nutris</strong>
+        <small>Clínica de Nutrição</small>
+      </div>
+    </div>
+    <nav id="menu">
+      <a href="#/" data-rota="inicio">🏠 Início</a>
+      <a href="#/pacientes" data-rota="pacientes">👥 Pacientes</a>
+      <a href="#/avaliacao" data-rota="avaliacao">📏 Avaliação e cálculos</a>
+      <a href="#/plano" data-rota="plano">🍽️ Plano alimentar</a>
+      <a href="#/dietas" data-rota="dietas">📋 Modelos de dieta</a>
+      <a href="#/receitas" data-rota="receitas">🍳 Receitas</a>
+      <a href="#/alimentos" data-rota="alimentos">🥕 Tabela de alimentos</a>
+    </nav>
+    <div class="sidebar-rodape">
+      <button class="btn btn-claro btn-sm" id="btn-exportar">⬇ Exportar backup</button>
+      <label class="btn btn-claro btn-sm">
+        ⬆ Importar backup
+        <input type="file" id="input-importar" accept="application/json" hidden>
+      </label>
+    </div>
+  </aside>
+
+  <main id="app"></main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/calculos.js"></script>
+  <script src="js/dados.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

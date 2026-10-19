@@ -23,17 +23,26 @@
       <a href="#/dietas" data-rota="dietas">📋 Modelos de dieta</a>
       <a href="#/receitas" data-rota="receitas">🍳 Receitas</a>
       <a href="#/alimentos" data-rota="alimentos">🥕 Tabela de alimentos</a>
+      <a href="#/usuarios" data-rota="usuarios" id="menu-usuarios" hidden>🔐 Usuários <span class="badge" id="badge-pendentes" hidden></span></a>
     </nav>
     <div class="sidebar-rodape">
-      <button class="btn btn-claro btn-sm" id="btn-exportar">⬇ Exportar backup</button>
-      <label class="btn btn-claro btn-sm">
-        ⬆ Importar backup
-        <input type="file" id="input-importar" accept="application/json" hidden>
-      </label>
+      <div class="usuario-box">
+        <strong id="usuario-nome"></strong>
+        <small id="usuario-papel"></small>
+      </div>
+      <a class="btn btn-claro btn-sm" href="#/conta">⚙ Minha conta</a>
+      <div id="backup-admin" class="sidebar-rodape-grupo" hidden>
+        <button class="btn btn-claro btn-sm" id="btn-exportar">⬇ Exportar backup</button>
+        <label class="btn btn-claro btn-sm">
+          ⬆ Importar backup
+          <input type="file" id="input-importar" accept="application/json" hidden>
+        </label>
+      </div>
+      <button class="btn btn-claro btn-sm" id="btn-sair">↩ Sair</button>
     </div>
   </aside>
 
-  <main id="app"></main>
+  <main id="app"><p class="vazio">Carregando…</p></main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

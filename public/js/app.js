@@ -30,20 +30,54 @@ function toast(msg) {
 const ir = (hash) => { location.hash = hash; };
 
 /* ============================================================
- * Armazenamento (localStorage)
+ * API (servidor) e armazenamento
  * ============================================================ */
+const Api = {
+  async req(metodo, url, corpo) {
+    const r = await fetch(url, {
+      method: metodo,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nutris' },
+      body: corpo === undefined ? undefined : JSON.stringify(corpo),
+    });
+    const dados = r.status === 204 ? null : await r.json().catch(() => null);
+    if (r.status === 401 && Store.usuario && !url.startsWith('/api/auth/')) sessaoExpirada();
+    if (!r.ok) {
+      const e = new Error(dados?.erro || `Erro ${r.status}`);
+      e.status = r.status;
+      throw e;
+    }
+    return dados;
+  },
+  get: (url) => Api.req('GET', url),
+  post: (url, corpo = {}) => Api.req('POST', url, corpo),
+  put: (url, corpo) => Api.req('PUT', url, corpo),
+  patch: (url, corpo) => Api.req('PATCH', url, corpo),
+  del: (url) => Api.req('DELETE', url),
+};
+
+/**
+ * Pacientes ficam no servidor (PostgreSQL) e são mantidos em cache na memória.
+ * Apenas o rascunho do plano alimentar fica no navegador, separado por usuário.
+ */
 const Store = {
-  chave: 'nutris.v1',
+  CHAVE_LEGADA: 'nutris.v1', // dados da versão anterior, que salvava tudo no navegador
+  usuario: null,
+  pendentes: 0,
   dados: { pacientes: [], rascunhoPlano: null },
 
-  carregar() {
-    try {
-      const salvo = JSON.parse(localStorage.getItem(this.chave));
-      if (salvo && Array.isArray(salvo.pacientes)) this.dados = { rascunhoPlano: null, ...salvo };
-    } catch { /* mantém padrão */ }
+  chaveRascunho() { return 'nutris.rascunho.' + this.usuario?.id; },
+  async carregar() {
+    this.dados.pacientes = await Api.get('/api/pacientes');
+    try { this.dados.rascunhoPlano = JSON.parse(localStorage.getItem(this.chaveRascunho())); } catch { this.dados.rascunhoPlano = null; }
+  },
+  limpar() {
+    this.usuario = null;
+    this.pendentes = 0;
+    this.dados = { pacientes: [], rascunhoPlano: null };
   },
   salvar() {
-    try { localStorage.setItem(this.chave, JSON.stringify(this.dados)); } catch { toast('Não foi possível salvar no navegador.'); }
+    try { localStorage.setItem(this.chaveRascunho(), JSON.stringify(this.dados.rascunhoPlano)); } catch { /* rascunho é opcional */ }
   },
   pacientes() { return this.dados.pacientes; },
   paciente(id) { return this.dados.pacientes.find((p) => p.id === id); },
@@ -51,13 +85,30 @@ const Store = {
     const i = this.dados.pacientes.findIndex((x) => x.id === p.id);
     p.atualizadoEm = new Date().toISOString();
     if (i >= 0) this.dados.pacientes[i] = p; else this.dados.pacientes.push(p);
-    this.salvar();
+    return Api.put('/api/pacientes/' + encodeURIComponent(p.id), p).catch((e) => {
+      toast('Erro ao salvar no servidor: ' + e.message);
+      this.recarregar();
+    });
   },
   excluirPaciente(id) {
     this.dados.pacientes = this.dados.pacientes.filter((p) => p.id !== id);
-    this.salvar();
+    return Api.del('/api/pacientes/' + encodeURIComponent(id)).catch((e) => {
+      toast('Erro ao excluir no servidor: ' + e.message);
+      this.recarregar();
+    });
+  },
+  async recarregar() {
+    try { this.dados.pacientes = await Api.get('/api/pacientes'); rotear(); } catch { /* já sinalizado */ }
+  },
+  pacientesLegados() {
+    try {
+      const salvo = JSON.parse(localStorage.getItem(this.CHAVE_LEGADA));
+      return Array.isArray(salvo?.pacientes) ? salvo.pacientes : [];
+    } catch { return []; }
   },
 };
+
+const ehAdmin = () => Store.usuario?.papel === 'admin';
 
 const ultimaAvaliacao = (p) => [...(p?.avaliacoes || [])].sort((a, b) => b.data.localeCompare(a.data))[0];
 
@@ -76,11 +127,26 @@ const ROTAS = {
   receitas: viewReceitas,
   receita: viewReceita,
   alimentos: viewAlimentos,
+  usuarios: viewUsuarios,
+  conta: viewConta,
 };
+const ROTAS_PUBLICAS = { login: viewLogin, cadastro: viewCadastro };
 const MENU_DE = { '': 'inicio', paciente: 'pacientes', 'paciente-form': 'pacientes', dieta: 'dietas', receita: 'receitas' };
 
 function rotear() {
   const [, nome = '', ...args] = location.hash.split('/');
+  document.body.classList.toggle('sem-sessao', !Store.usuario);
+  if (!Store.usuario) {
+    const app = $('#app');
+    app.innerHTML = '';
+    const raiz = document.createElement('div');
+    raiz.className = 'auth-card';
+    app.appendChild(raiz);
+    (ROTAS_PUBLICAS[nome] || viewLogin)(raiz);
+    return;
+  }
+  if (ROTAS_PUBLICAS[nome]) return ir('#/');
+  if (nome === 'usuarios' && !ehAdmin()) return ir('#/');
   const view = ROTAS[nome] || viewInicio;
   const menu = MENU_DE[nome] ?? nome;
   $$('#menu a').forEach((a) => a.classList.toggle('ativo', a.dataset.rota === menu));
@@ -100,9 +166,19 @@ function viewInicio(raiz) {
   const nAval = pacs.reduce((t, p) => t + (p.avaliacoes?.length || 0), 0);
   const recentes = [...pacs].sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || '')).slice(0, 5);
 
+  const legados = ehAdmin() ? Store.pacientesLegados() : [];
+
   raiz.innerHTML = `
-    <h1>Bem-vindo(a) ao Nutris</h1>
+    <h1>Olá, ${esc(Store.usuario.nome.split(' ')[0])}!</h1>
     <p class="subtitulo">Sistema de apoio à clínica de nutrição — avaliação, cálculos, planos alimentares, dietas e receitas.</p>
+
+    ${Store.pendentes ? `<div class="aviso">🔔 Há <strong>${Store.pendentes}</strong> solicitação(ões) de acesso aguardando aprovação. <a href="#/usuarios">Revisar agora</a></div>` : ''}
+    ${legados.length ? `<div class="info">
+      📦 Encontramos <strong>${legados.length}</strong> paciente(s) salvos neste navegador pela versão anterior do sistema.
+      <div class="acoes" style="margin-top:8px">
+        <button class="btn btn-sm" id="migrar">Enviar para o servidor</button>
+        <button class="btn btn-sec btn-sm" id="descartar-legado">Descartar dados do navegador</button>
+      </div></div>` : ''}
 
     <div class="indicadores" style="margin-bottom:18px">
       <div class="indicador"><div class="rotulo">Pacientes</div><div class="valor">${pacs.length}</div></div>
@@ -122,6 +198,25 @@ function viewInicio(raiz) {
       <h2>Pacientes recentes</h2>
       ${recentes.length ? tabelaPacientes(recentes) : '<p class="vazio">Nenhum paciente cadastrado ainda.</p>'}
     </div>`;
+
+  $('#migrar', raiz)?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const r = await Api.post('/api/pacientes/importar', { pacientes: legados });
+      localStorage.removeItem(Store.CHAVE_LEGADA);
+      await Store.carregar();
+      toast(`${r.importados} paciente(s) enviados para o servidor.`);
+      rotear();
+    } catch (err) {
+      e.target.disabled = false;
+      toast('Erro na migração: ' + err.message);
+    }
+  });
+  $('#descartar-legado', raiz)?.addEventListener('click', () => {
+    if (!confirm('Apagar os pacientes salvos neste navegador? Eles NÃO foram enviados ao servidor.')) return;
+    localStorage.removeItem(Store.CHAVE_LEGADA);
+    rotear();
+  });
 }
 
 /* ============================================================
@@ -132,7 +227,7 @@ function tabelaPacientes(lista) {
     <thead><tr><th>Nome</th><th>Idade</th><th>Sexo</th><th>Objetivo</th><th>Última avaliação</th><th class="num">Peso</th><th class="num">IMC</th></tr></thead>
     <tbody>${lista.map((p) => {
     const u = ultimaAvaliacao(p);
-    return `<tr style="cursor:pointer" onclick="ir('#/paciente/${p.id}')">
+    return `<tr style="cursor:pointer" data-href="#/paciente/${p.id}">
         <td><strong>${esc(p.nome)}</strong></td>
         <td>${fmt(Calc.idade(p.nascimento))}</td>
         <td>${p.sexo === 'M' ? 'Masc.' : 'Fem.'}</td>
@@ -387,7 +482,7 @@ function viewAvaliacao(raiz, pid, aid) {
         <div class="acoes">
           <button class="btn" type="submit" id="btn-salvar">💾 Salvar avaliação</button>
           <button class="btn btn-sec" type="button" id="btn-plano">🍽️ Gerar plano com esta meta</button>
-          <button class="btn btn-sec" type="button" onclick="window.print()">🖨️ Imprimir</button>
+          <button class="btn btn-sec" type="button" data-imprimir>🖨️ Imprimir</button>
         </div>
       </form>
       <div class="resultados" id="resultados"></div>
@@ -612,7 +707,7 @@ function viewPlano(raiz) {
         <div><h1>Plano alimentar</h1><p class="subtitulo">${pac ? esc(pac.nome) : 'Sem paciente vinculado'} · ${dataBR(plano.data)}</p></div>
         <div class="acoes nao-imprimir">
           <button class="btn" data-acao="salvar">💾 Salvar no paciente</button>
-          <button class="btn btn-sec" onclick="window.print()">🖨️ Imprimir</button>
+          <button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button>
           <button class="btn btn-perigo" data-acao="limpar">Novo / limpar</button>
         </div>
       </div>
@@ -826,7 +921,7 @@ function viewDieta(raiz, id) {
       <div><h1>${esc(d.nome)}</h1><p class="subtitulo">${esc(d.objetivo)}</p></div>
       <div class="acoes nao-imprimir">
         <button class="btn" id="usar">🍽️ Usar no plano alimentar</button>
-        <button class="btn btn-sec" onclick="window.print()">🖨️ Imprimir</button>
+        <button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button>
       </div>
     </div>
     <div class="grid grid-2">
@@ -938,7 +1033,7 @@ function viewReceita(raiz, id) {
   raiz.innerHTML = `
     <div class="cabecalho">
       <div><h1>${esc(r.nome)}</h1><p class="subtitulo">${esc(r.categoria)} · ⏱ ${r.tempo} min · rende ${r.porcoes} porç${r.porcoes > 1 ? 'ões' : 'ão'} (≈ ${fmt(pesoTotal / r.porcoes)} g cada, peso cru)</p></div>
-      <div class="acoes nao-imprimir"><a class="btn btn-sec" href="#/receitas">← Receitas</a><button class="btn btn-sec" onclick="window.print()">🖨️ Imprimir</button></div>
+      <div class="acoes nao-imprimir"><a class="btn btn-sec" href="#/receitas">← Receitas</a><button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button></div>
     </div>
     <div class="grid grid-2">
       <div class="card">
@@ -1014,7 +1109,8 @@ function viewAlimentos(raiz) {
  * Backup (exportar / importar JSON)
  * ============================================================ */
 function exportar() {
-  const blob = new Blob([JSON.stringify(Store.dados, null, 2)], { type: 'application/json' });
+  const dados = { exportadoEm: new Date().toISOString(), pacientes: Store.pacientes() };
+  const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `nutris-backup-${hoje()}.json`;
@@ -1025,27 +1121,285 @@ function exportar() {
 
 function importar(arquivo) {
   const leitor = new FileReader();
-  leitor.onload = () => {
+  leitor.onload = async () => {
+    let dados;
     try {
-      const dados = JSON.parse(leitor.result);
+      dados = JSON.parse(leitor.result);
       if (!Array.isArray(dados.pacientes)) throw new Error('formato');
-      if (!confirm(`Importar ${dados.pacientes.length} paciente(s)? Os dados atuais serão substituídos.`)) return;
-      Store.dados = { rascunhoPlano: null, ...dados };
-      Store.salvar();
-      toast('Backup importado.');
-      rotear();
     } catch {
-      toast('Arquivo de backup inválido.');
+      return toast('Arquivo de backup inválido.');
+    }
+    if (!confirm(`Importar ${dados.pacientes.length} paciente(s)? Pacientes com o mesmo identificador serão atualizados.`)) return;
+    try {
+      const r = await Api.post('/api/pacientes/importar', { pacientes: dados.pacientes });
+      await Store.carregar();
+      toast(`${r.importados} paciente(s) importados.`);
+      rotear();
+    } catch (e) {
+      toast('Erro ao importar: ' + e.message);
     }
   };
   leitor.readAsText(arquivo);
 }
 
 /* ============================================================
- * Inicialização
+ * Login e solicitação de acesso
  * ============================================================ */
-Store.carregar();
-$('#btn-exportar').onclick = exportar;
-$('#input-importar').onchange = (e) => { if (e.target.files[0]) importar(e.target.files[0]); e.target.value = ''; };
-window.addEventListener('hashchange', rotear);
-rotear();
+const cabecalhoAuth = (titulo) => `<div class="logo-auth"><span>🥗</span><h1>Nutris</h1><p class="subtitulo" style="margin:4px 0 0">${titulo}</p></div>`;
+
+function viewLogin(raiz) {
+  raiz.innerHTML = `<div class="card">
+    ${cabecalhoAuth('Acesso da equipe da clínica')}
+    <form id="form" novalidate>
+      <div id="erro" class="erro-form" hidden></div>
+      <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
+      <div class="campo"><label for="senha">Senha</label><input id="senha" name="senha" type="password" autocomplete="current-password" required></div>
+      <button class="btn" type="submit">Entrar</button>
+    </form>
+    <p class="alternar">Ainda não tem acesso? <a href="#/cadastro">Solicitar cadastro</a></p>
+  </div>`;
+
+  $('#form', raiz).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', raiz);
+    const erro = $('#erro', raiz);
+    btn.disabled = true;
+    erro.hidden = true;
+    try {
+      const me = await Api.post('/api/auth/login', Object.fromEntries(new FormData(e.target)));
+      await entrar(me);
+      if (location.hash === '#/' || location.hash === '') rotear(); else ir('#/');
+    } catch (err) {
+      erro.textContent = err.message;
+      erro.hidden = false;
+      btn.disabled = false;
+    }
+  });
+}
+
+function viewCadastro(raiz) {
+  raiz.innerHTML = `<div class="card">
+    ${cabecalhoAuth('Solicitar acesso ao sistema')}
+    <div id="conteudo">
+      <form id="form" novalidate>
+        <div id="erro" class="erro-form" hidden></div>
+        <div class="campo"><label for="nome">Nome completo</label><input id="nome" name="nome" autocomplete="name" required autofocus></div>
+        <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+        <div class="campo"><label for="crn">CRN (opcional)</label><input id="crn" name="crn" placeholder="Ex.: CRN-3 12345"></div>
+        <div class="campo"><label for="senha">Senha (mín. 8 caracteres)</label><input id="senha" name="senha" type="password" autocomplete="new-password" minlength="8" required></div>
+        <div class="campo"><label for="senha2">Confirmar senha</label><input id="senha2" name="senha2" type="password" autocomplete="new-password" required></div>
+        <button class="btn" type="submit">Enviar solicitação</button>
+        <p class="ajuda" style="margin:0">Seu acesso será liberado após a aprovação do administrador da clínica.</p>
+      </form>
+    </div>
+    <p class="alternar"><a href="#/login">← Voltar para o login</a></p>
+  </div>`;
+
+  $('#form', raiz).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target));
+    const erro = $('#erro', raiz);
+    const mostrar = (msg) => { erro.textContent = msg; erro.hidden = false; };
+    erro.hidden = true;
+    if (d.senha !== d.senha2) return mostrar('As senhas não conferem.');
+    if (d.senha.length < 8) return mostrar('A senha deve ter pelo menos 8 caracteres.');
+    const btn = $('button[type=submit]', raiz);
+    btn.disabled = true;
+    try {
+      const { senha2, ...corpo } = d;
+      const r = await Api.post('/api/auth/cadastro', corpo);
+      $('#conteudo', raiz).innerHTML = `<div class="info">✅ ${esc(r.mensagem)}</div>`;
+    } catch (err) {
+      mostrar(err.message);
+      btn.disabled = false;
+    }
+  });
+}
+
+/* ============================================================
+ * Usuários (administrador)
+ * ============================================================ */
+const STATUS_USUARIO = {
+  pendente: { texto: 'Pendente', nivel: 'alerta' },
+  aprovado: { texto: 'Aprovado', nivel: 'ok' },
+  rejeitado: { texto: 'Rejeitado', nivel: 'neutro' },
+  bloqueado: { texto: 'Bloqueado', nivel: 'risco' },
+};
+const dataHoraBR = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+
+async function viewUsuarios(raiz) {
+  raiz.innerHTML = '<h1>Usuários</h1><p class="subtitulo">Carregando…</p>';
+  let usuarios;
+  try {
+    usuarios = await Api.get('/api/usuarios');
+  } catch (e) {
+    raiz.innerHTML = `<h1>Usuários</h1><div class="aviso">${esc(e.message)}</div>`;
+    return;
+  }
+  const pendentes = usuarios.filter((u) => u.status === 'pendente');
+  const demais = usuarios.filter((u) => u.status !== 'pendente');
+  Store.pendentes = pendentes.length;
+  atualizarSidebar();
+
+  const acoes = (u) => {
+    if (u.id === Store.usuario.id) return '<span class="medida">você</span>';
+    const b = (acao, rotulo, cls = 'btn-sec') => `<button class="btn ${cls} btn-sm" data-acao="${acao}" data-id="${u.id}">${rotulo}</button>`;
+    const lista = [];
+    if (u.status === 'aprovado') {
+      lista.push(u.papel === 'admin' ? b('nutricionista', 'Remover admin') : b('admin', 'Tornar admin'));
+      lista.push(b('senha', 'Redefinir senha'));
+      lista.push(b('bloqueado', 'Bloquear', 'btn-perigo'));
+    } else {
+      lista.push(b('aprovado', u.status === 'bloqueado' ? 'Reativar' : 'Aprovar', u.status === 'bloqueado' ? 'btn-sec' : ''));
+    }
+    return `<div class="acoes" style="justify-content:flex-end">${lista.join('')}</div>`;
+  };
+
+  raiz.innerHTML = `
+    <h1>Usuários</h1>
+    <p class="subtitulo">Aprove as solicitações de acesso da equipe e gerencie quem pode entrar no sistema.</p>
+
+    <div class="card">
+      <h2>Solicitações pendentes ${pendentes.length ? `<span class="badge">${pendentes.length}</span>` : ''}</h2>
+      ${pendentes.length ? `<div class="tabela-wrap"><table>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>CRN</th><th>Solicitado em</th><th></th></tr></thead>
+        <tbody>${pendentes.map((u) => `<tr>
+          <td><strong>${esc(u.nome)}</strong></td><td>${esc(u.email)}</td><td>${esc(u.crn || '—')}</td><td>${dataHoraBR(u.criadoEm)}</td>
+          <td class="num"><div class="acoes" style="justify-content:flex-end">
+            <button class="btn btn-sm" data-acao="aprovado" data-id="${u.id}">✓ Aprovar</button>
+            <button class="btn btn-perigo btn-sm" data-acao="rejeitado" data-id="${u.id}">✕ Rejeitar</button>
+          </div></td></tr>`).join('')}</tbody></table></div>` : '<p class="vazio">Nenhuma solicitação aguardando aprovação.</p>'}
+    </div>
+
+    <div class="card">
+      <h2>Equipe</h2>
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>CRN</th><th>Perfil</th><th>Situação</th><th>Atualizado em</th><th></th></tr></thead>
+        <tbody>${demais.map((u) => `<tr>
+          <td><strong>${esc(u.nome)}</strong></td><td>${esc(u.email)}</td><td>${esc(u.crn || '—')}</td>
+          <td>${u.papel === 'admin' ? 'Administrador' : 'Nutricionista'}</td>
+          <td>${selo(STATUS_USUARIO[u.status])}</td>
+          <td>${dataHoraBR(u.decididoEm || u.criadoEm)}</td>
+          <td class="num">${acoes(u)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+
+  raiz.addEventListener('click', async (e) => {
+    const t = e.target.closest('button[data-acao]');
+    if (!t) return;
+    const u = usuarios.find((x) => x.id === +t.dataset.id);
+    const acao = t.dataset.acao;
+    const mensagens = {
+      aprovado: `Liberar o acesso de ${u.nome}?`,
+      rejeitado: `Rejeitar a solicitação de ${u.nome}?`,
+      bloqueado: `Bloquear o acesso de ${u.nome}? As sessões abertas serão encerradas.`,
+      admin: `Dar perfil de administrador a ${u.nome}? A pessoa poderá aprovar e bloquear usuários.`,
+      nutricionista: `Remover o perfil de administrador de ${u.nome}?`,
+    };
+    try {
+      if (acao === 'senha') {
+        const senha = prompt(`Nova senha para ${u.nome} (mín. 8 caracteres):`);
+        if (!senha) return;
+        await Api.post(`/api/usuarios/${u.id}/senha`, { senha });
+        toast('Senha redefinida. Informe a nova senha ao usuário.');
+        return;
+      }
+      if (!confirm(mensagens[acao])) return;
+      const corpo = ['admin', 'nutricionista'].includes(acao) ? { papel: acao } : { status: acao };
+      await Api.patch(`/api/usuarios/${u.id}`, corpo);
+      toast('Usuário atualizado.');
+      rotear();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+}
+
+/* ============================================================
+ * Minha conta
+ * ============================================================ */
+function viewConta(raiz) {
+  const u = Store.usuario;
+  raiz.innerHTML = `
+    <h1>Minha conta</h1>
+    <p class="subtitulo">${esc(u.nome)} · ${esc(u.email)} · ${u.papel === 'admin' ? 'Administrador' : 'Nutricionista'}${u.crn ? ' · ' + esc(u.crn) : ''}</p>
+    <form class="card" id="form" style="max-width:460px">
+      <h2>Alterar senha</h2>
+      <div class="campos">
+        <div class="campo largo"><label>Senha atual</label><input type="password" name="atual" autocomplete="current-password" required></div>
+        <div class="campo largo"><label>Nova senha (mín. 8 caracteres)</label><input type="password" name="nova" autocomplete="new-password" minlength="8" required></div>
+        <div class="campo largo"><label>Confirmar nova senha</label><input type="password" name="nova2" autocomplete="new-password" required></div>
+      </div>
+      <div class="acoes" style="margin-top:14px"><button class="btn" type="submit">Salvar nova senha</button></div>
+    </form>`;
+  $('#form', raiz).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target));
+    if (d.nova !== d.nova2) return toast('As senhas não conferem.');
+    try {
+      await Api.post('/api/auth/senha', { atual: d.atual, nova: d.nova });
+      e.target.reset();
+      toast('Senha alterada. Outras sessões foram encerradas.');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+}
+
+/* ============================================================
+ * Sessão e inicialização
+ * ============================================================ */
+function atualizarSidebar() {
+  const u = Store.usuario;
+  if (!u) return;
+  $('#usuario-nome').textContent = u.nome;
+  $('#usuario-papel').textContent = u.papel === 'admin' ? 'Administrador' : 'Nutricionista';
+  $('#menu-usuarios').hidden = u.papel !== 'admin';
+  $('#backup-admin').hidden = u.papel !== 'admin';
+  const badge = $('#badge-pendentes');
+  badge.textContent = Store.pendentes;
+  badge.hidden = !Store.pendentes;
+}
+
+async function entrar(me) {
+  Store.usuario = me.usuario;
+  Store.pendentes = me.pendentes || 0;
+  await Store.carregar();
+  atualizarSidebar();
+}
+
+function sessaoExpirada() {
+  Store.limpar();
+  toast('Sua sessão expirou. Entre novamente.');
+  ir('#/login');
+  rotear();
+}
+
+async function sair() {
+  try { await Api.post('/api/auth/logout'); } catch { /* encerra localmente de qualquer forma */ }
+  Store.limpar();
+  ir('#/login');
+  rotear();
+}
+
+// Ações globais (substituem handlers inline, bloqueados pela política de segurança)
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-imprimir]')) return window.print();
+  const linha = e.target.closest('[data-href]');
+  if (linha && !e.target.closest('a,button,input,select')) ir(linha.dataset.href);
+});
+
+async function iniciar() {
+  $('#btn-exportar').onclick = exportar;
+  $('#input-importar').onchange = (e) => { if (e.target.files[0]) importar(e.target.files[0]); e.target.value = ''; };
+  $('#btn-sair').onclick = sair;
+  try {
+    await entrar(await Api.get('/api/auth/me'));
+  } catch {
+    Store.limpar();
+  }
+  window.addEventListener('hashchange', rotear);
+  rotear();
+}
+
+iniciar();

@@ -1,0 +1,20 @@
+{
+  "name": "nutris",
+  "version": "1.0.0",
+  "description": "Sistema para clínica de nutrição — avaliação, cálculos, planos alimentares, dietas e receitas",
+  "private": true,
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --env-file=.env --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}

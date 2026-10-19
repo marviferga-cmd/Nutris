@@ -5,16 +5,39 @@ const bcrypt = require('bcryptjs');
 
 const CUSTO_BCRYPT = 12;
 
-function criarPool() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error('A variável DATABASE_URL não está definida.');
+/** Descobre a conexão a partir das variáveis que o Railway (ou outro provedor) disponibiliza. */
+function configuracaoConexao(env = process.env) {
+  const sslForcado = env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined;
+  const candidatas = [
+    ['DATABASE_URL', sslForcado],
+    ['DATABASE_PRIVATE_URL', sslForcado],
+    ['POSTGRES_URL', sslForcado],
+    // URL pública passa pelo proxy externo e exige SSL
+    ['DATABASE_PUBLIC_URL', { rejectUnauthorized: false }],
+  ];
+  for (const [nome, ssl] of candidatas) {
+    if (env[nome]) return { origem: nome, config: { connectionString: env[nome], ssl } };
   }
-  return new Pool({
-    connectionString: process.env.DATABASE_URL,
-    // Na rede interna do Railway não há SSL; para conexões externas defina DATABASE_SSL=true
-    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-    max: 10,
-  });
+  // O driver pg lê PGHOST, PGPORT, PGUSER, PGPASSWORD e PGDATABASE automaticamente
+  if (env.PGHOST) return { origem: 'PGHOST/PGUSER/PGPASSWORD', config: { ssl: sslForcado } };
+  return null;
+}
+
+function criarPool() {
+  const conexao = configuracaoConexao();
+  if (!conexao) {
+    // Lista só os NOMES das variáveis relacionadas a banco (nunca os valores), para diagnóstico
+    const relacionadas = Object.keys(process.env)
+      .filter((k) => /DATABASE|POSTGRES|^PG/i.test(k))
+      .map((k) => (process.env[k] ? k : `${k} (vazia — referência inválida?)`));
+    throw new Error(
+      'Nenhuma conexão com o banco foi configurada. Defina DATABASE_URL no serviço do app '
+      + '(no Railway: Variables → Add Reference → Postgres → DATABASE_URL). '
+      + `Variáveis de banco encontradas: ${relacionadas.length ? relacionadas.join(', ') : 'nenhuma'}.`,
+    );
+  }
+  console.log(`[nutris] Conectando ao PostgreSQL via ${conexao.origem}`);
+  return new Pool({ ...conexao.config, max: 10 });
 }
 
 const MIGRACOES = [

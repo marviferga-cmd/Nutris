@@ -10,6 +10,8 @@ const fmt = (v, d = 0) => (v == null || isNaN(v) ? '—' : Number(v).toLocaleStr
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const dataBR = (iso) => (iso ? iso.split('-').reverse().join('/') : '—');
 const selo = (c) => (c ? `<span class="selo ${c.nivel}">${esc(c.texto)}</span>` : '');
+const iniciais = (nome) => String(nome || '?').trim().split(/\s+/).filter(Boolean)
+  .filter((_, i, a) => i === 0 || i === a.length - 1).map((p) => p[0]).join('').toUpperCase();
 const opcoes = (lista, sel, val = (x) => x.id, txt = (x) => x.nome) => lista
   .map((x) => `<option value="${esc(val(x))}" ${String(val(x)) === String(sel ?? '') ? 'selected' : ''}>${esc(txt(x))}</option>`).join('');
 
@@ -140,7 +142,7 @@ function rotear() {
     const app = $('#app');
     app.innerHTML = '';
     const raiz = document.createElement('div');
-    raiz.className = 'auth-card';
+    raiz.className = 'auth';
     app.appendChild(raiz);
     (ROTAS_PUBLICAS[nome] || viewLogin)(raiz);
     return;
@@ -168,35 +170,49 @@ function viewInicio(raiz) {
 
   const legados = ehAdmin() ? Store.pacientesLegados() : [];
 
-  raiz.innerHTML = `
-    <h1>Olá, ${esc(Store.usuario.nome.split(' ')[0])}!</h1>
-    <p class="subtitulo">Sistema de apoio à clínica de nutrição — avaliação, cálculos, planos alimentares, dietas e receitas.</p>
+  const nPlanos = pacs.reduce((t, p) => t + (p.planos?.length || 0), 0);
+  const limite30 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const aval30 = pacs.reduce((t, p) => t + (p.avaliacoes || []).filter((a) => a.data >= limite30).length, 0);
+  const hojeExtenso = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const kpi = (ic, cor, rotulo, valor, detalhe) => `<div class="kpi"><div class="kpi-icone ${cor}">${icone(ic)}</div>
+    <div><div class="rotulo">${rotulo}</div><div class="valor">${valor}</div><div class="detalhe">${detalhe}</div></div></div>`;
+  const atalho = (href, ic, cor, titulo, desc) => `<a class="atalho" href="${href}"><div class="kpi-icone ${cor}">${icone(ic)}</div>
+    <div><strong>${titulo}</strong><span class="desc">${desc}</span></div>${icone('seta')}</a>`;
 
-    ${Store.pendentes ? `<div class="aviso">🔔 Há <strong>${Store.pendentes}</strong> solicitação(ões) de acesso aguardando aprovação. <a href="#/usuarios">Revisar agora</a></div>` : ''}
+  raiz.innerHTML = `
+    <div class="cabecalho">
+      <div>
+        <p class="sobretitulo">${esc(hojeExtenso)}</p>
+        <h1>Olá, ${esc(Store.usuario.nome.split(' ')[0])}</h1>
+        <p class="subtitulo">Acompanhe a sua clínica e comece um novo atendimento.</p>
+      </div>
+      <div class="acoes"><a class="btn" href="#/paciente-form">${icone('novoPaciente')}Novo paciente</a></div>
+    </div>
+
+    ${Store.pendentes ? `<div class="aviso">Há <strong>${Store.pendentes}</strong> solicitação(ões) de acesso aguardando aprovação. <a href="#/usuarios">Revisar agora →</a></div>` : ''}
     ${legados.length ? `<div class="info">
-      📦 Encontramos <strong>${legados.length}</strong> paciente(s) salvos neste navegador pela versão anterior do sistema.
-      <div class="acoes" style="margin-top:8px">
-        <button class="btn btn-sm" id="migrar">Enviar para o servidor</button>
+      Encontramos <strong>${legados.length}</strong> paciente(s) salvos neste navegador pela versão anterior do sistema.
+      <div class="acoes" style="margin-top:10px">
+        <button class="btn btn-sm" id="migrar">${icone('importar')}Enviar para o servidor</button>
         <button class="btn btn-sec btn-sm" id="descartar-legado">Descartar dados do navegador</button>
       </div></div>` : ''}
 
-    <div class="indicadores" style="margin-bottom:18px">
-      <div class="indicador"><div class="rotulo">Pacientes</div><div class="valor">${pacs.length}</div></div>
-      <div class="indicador"><div class="rotulo">Avaliações</div><div class="valor">${nAval}</div></div>
-      <div class="indicador"><div class="rotulo">Modelos de dieta</div><div class="valor">${DIETAS.length}</div></div>
-      <div class="indicador"><div class="rotulo">Receitas</div><div class="valor">${RECEITAS.length}</div></div>
-      <div class="indicador"><div class="rotulo">Alimentos</div><div class="valor">${ALIMENTOS.length}</div></div>
+    <div class="kpis">
+      ${kpi('pacientes', '', 'Pacientes', pacs.length, 'cadastrados na clínica')}
+      ${kpi('avaliacao', 'azul', 'Avaliações', nAval, `${aval30} nos últimos 30 dias`)}
+      ${kpi('plano', 'ambar', 'Planos alimentares', nPlanos, 'salvos nos prontuários')}
+      ${kpi('receitas', 'rosa', 'Biblioteca', DIETAS.length + RECEITAS.length, `${DIETAS.length} dietas · ${RECEITAS.length} receitas`)}
     </div>
 
-    <div class="grid grid-3" style="margin-bottom:18px">
-      <a class="card item-card" href="#/paciente-form"><h2>➕ Novo paciente</h2><p>Cadastre um paciente e inicie o acompanhamento.</p></a>
-      <a class="card item-card" href="#/avaliacao"><h2>📏 Avaliação rápida</h2><p>IMC, % de gordura, TMB, GET, VET e macronutrientes.</p></a>
-      <a class="card item-card" href="#/plano"><h2>🍽️ Montar plano alimentar</h2><p>Monte refeições com cálculo automático de calorias e macros.</p></a>
+    <div class="grid grid-3" style="margin-bottom:20px">
+      ${atalho('#/avaliacao', 'avaliacao', 'azul', 'Avaliação rápida', 'IMC, % gordura, TMB, GET e macros')}
+      ${atalho('#/plano', 'plano', 'ambar', 'Montar plano alimentar', 'Refeições com cálculo automático')}
+      ${atalho('#/dietas', 'dietas', '', 'Modelos de dieta', 'Cardápios ajustáveis por kcal')}
     </div>
 
     <div class="card">
-      <h2>Pacientes recentes</h2>
-      ${recentes.length ? tabelaPacientes(recentes) : '<p class="vazio">Nenhum paciente cadastrado ainda.</p>'}
+      <div class="card-cab"><h2>Pacientes recentes</h2><a class="btn btn-sec btn-sm" href="#/pacientes">Ver todos${icone('seta')}</a></div>
+      ${recentes.length ? tabelaPacientes(recentes) : '<p class="vazio">Nenhum paciente cadastrado ainda. Comece em “Novo paciente”.</p>'}
     </div>`;
 
   $('#migrar', raiz)?.addEventListener('click', async (e) => {
@@ -227,14 +243,14 @@ function tabelaPacientes(lista) {
     <thead><tr><th>Nome</th><th>Idade</th><th>Sexo</th><th>Objetivo</th><th>Última avaliação</th><th class="num">Peso</th><th class="num">IMC</th></tr></thead>
     <tbody>${lista.map((p) => {
     const u = ultimaAvaliacao(p);
-    return `<tr style="cursor:pointer" data-href="#/paciente/${p.id}">
-        <td><strong>${esc(p.nome)}</strong></td>
+    return `<tr data-href="#/paciente/${p.id}">
+        <td><div class="pessoa"><span class="avatar sm">${esc(iniciais(p.nome))}</span><strong>${esc(p.nome)}</strong></div></td>
         <td>${fmt(Calc.idade(p.nascimento))}</td>
         <td>${p.sexo === 'M' ? 'Masc.' : 'Fem.'}</td>
         <td>${esc(p.objetivo || '—')}</td>
         <td>${u ? dataBR(u.data) : '<span class="vazio">nenhuma</span>'}</td>
         <td class="num">${u ? fmt(u.resultado.peso, 1) + ' kg' : '—'}</td>
-        <td class="num">${u ? fmt(u.resultado.imc, 1) : '—'}</td>
+        <td class="num">${u ? fmt(u.resultado.imc, 1) + ' ' + selo(Calc.classificaIMC(u.resultado.imc, Calc.idade(p.nascimento))) : '—'}</td>
       </tr>`;
   }).join('')}</tbody></table></div>`;
 }
@@ -243,7 +259,7 @@ function viewPacientes(raiz) {
   raiz.innerHTML = `
     <div class="cabecalho">
       <div><h1>Pacientes</h1><p class="subtitulo">${Store.pacientes().length} paciente(s) cadastrado(s)</p></div>
-      <a class="btn" href="#/paciente-form">➕ Novo paciente</a>
+      <a class="btn" href="#/paciente-form">${icone('novoPaciente')}Novo paciente</a>
     </div>
     <div class="card">
       <div class="filtros"><input class="busca" type="search" placeholder="Buscar por nome…" id="busca"></div>
@@ -278,7 +294,7 @@ function viewPacienteForm(raiz, id) {
         <div class="campo largo"><label>Observações (rotina, hábitos, histórico)</label><textarea name="obs">${esc(v.obs)}</textarea></div>
       </div>
       <div class="acoes" style="margin-top:16px">
-        <button class="btn" type="submit">💾 Salvar</button>
+        <button class="btn" type="submit">${icone('salvar')}Salvar</button>
         <a class="btn btn-sec" href="${p ? '#/paciente/' + p.id : '#/pacientes'}">Cancelar</a>
       </div>
     </form>`;
@@ -307,9 +323,9 @@ function viewPaciente(raiz, id) {
         <p class="subtitulo">${p.sexo === 'M' ? 'Masculino' : 'Feminino'} · ${fmt(Calc.idade(p.nascimento))} anos · nascido(a) em ${dataBR(p.nascimento)}</p>
       </div>
       <div class="acoes">
-        <a class="btn" href="#/avaliacao/${p.id}">📏 Nova avaliação</a>
-        <button class="btn btn-sec" id="novo-plano">🍽️ Novo plano alimentar</button>
-        <a class="btn btn-sec" href="#/paciente-form/${p.id}">✏️ Editar</a>
+        <a class="btn" href="#/avaliacao/${p.id}">${icone('avaliacao')}Nova avaliação</a>
+        <button class="btn btn-sec" id="novo-plano">${icone('plano')}Novo plano alimentar</button>
+        <a class="btn btn-sec" href="#/paciente-form/${p.id}">${icone('editar')}Editar</a>
         <button class="btn btn-perigo" id="excluir">Excluir</button>
       </div>
     </div>
@@ -358,7 +374,7 @@ function viewPaciente(raiz, id) {
             <td class="num">${fmt(r.vet)}</td>
             <td class="num"><div class="acoes" style="justify-content:flex-end">
               <a class="btn btn-sec btn-sm" href="#/avaliacao/${p.id}/${a.id}">Abrir</a>
-              <button class="btn-x" data-excluir-aval="${a.id}" title="Excluir">✕</button></div></td>
+              <button class="btn-x" data-excluir-aval="${a.id}" title="Excluir">${icone('lixeira')}</button></div></td>
           </tr>`;
   }).join('')}</tbody></table></div>` : '<p class="vazio">Sem avaliações.</p>'}
     </div>
@@ -373,7 +389,7 @@ function viewPaciente(raiz, id) {
           <td class="num">${pl.refeicoes.length}</td>
           <td class="num"><div class="acoes" style="justify-content:flex-end">
             <button class="btn btn-sec btn-sm" data-abrir-plano="${pl.id}">Abrir</button>
-            <button class="btn-x" data-excluir-plano="${pl.id}" title="Excluir">✕</button></div></td>
+            <button class="btn-x" data-excluir-plano="${pl.id}" title="Excluir">${icone('lixeira')}</button></div></td>
         </tr>`).join('')}</tbody></table></div>` : '<p class="vazio">Nenhum plano salvo.</p>'}
     </div>`;
 
@@ -480,9 +496,9 @@ function viewAvaliacao(raiz, pid, aid) {
         <div class="campo largo" style="margin-bottom:14px"><label>Observações da consulta</label><textarea name="obs">${esc(v.obs)}</textarea></div>
 
         <div class="acoes">
-          <button class="btn" type="submit" id="btn-salvar">💾 Salvar avaliação</button>
-          <button class="btn btn-sec" type="button" id="btn-plano">🍽️ Gerar plano com esta meta</button>
-          <button class="btn btn-sec" type="button" data-imprimir>🖨️ Imprimir</button>
+          <button class="btn" type="submit" id="btn-salvar">${icone('salvar')}Salvar avaliação</button>
+          <button class="btn btn-sec" type="button" id="btn-plano">${icone('plano')}Gerar plano com esta meta</button>
+          <button class="btn btn-sec" type="button" data-imprimir>${icone('imprimir')}Imprimir</button>
         </div>
       </form>
       <div class="resultados" id="resultados"></div>
@@ -575,7 +591,7 @@ function htmlResultados(r, d) {
       <div class="indicador"><div class="rotulo">GET</div><div class="valor">${fmt(r.get)} <small>kcal</small></div><small>${esc(r.formula || '')}</small></div>
       <div class="indicador"><div class="rotulo">VET (meta)</div><div class="valor">${fmt(r.vet)} <small>kcal</small></div><small>${esc(r.objetivo)}</small></div>
     </div>
-    ${r.alertaVet ? '<div class="aviso">⚠️ O VET ficou abaixo da TMB. Reavalie o déficit calórico.</div>' : ''}
+    ${r.alertaVet ? '<div class="aviso">O VET ficou abaixo da TMB. Reavalie o déficit calórico.</div>' : ''}
   </div>
 
   <div class="card">
@@ -635,8 +651,8 @@ function htmlResultados(r, d) {
         <thead><tr><th>Nutriente</th><th class="num">Gramas</th><th class="num">kcal</th><th class="num">% VET</th><th class="num">g/kg</th></tr></thead>
         <tbody>${linhaMacro('Carboidratos', m.carboidrato)}${linhaMacro('Proteínas', m.proteina)}${linhaMacro('Lipídios', m.lipidio)}</tbody>
       </table></div>
-      ${m.carboidrato.pct < 26 ? '<div class="aviso">⚠️ Carboidratos abaixo de 26% do VET (padrão low carb). Verifique se é intencional.</div>' : ''}
-      ${m.carboidrato.pct > 65 ? '<div class="aviso">⚠️ Carboidratos acima de 65% do VET (acima da faixa da DRI de 45–65%).</div>' : ''}
+      ${m.carboidrato.pct < 26 ? '<div class="aviso">Carboidratos abaixo de 26% do VET (padrão low carb). Verifique se é intencional.</div>' : ''}
+      ${m.carboidrato.pct > 65 ? '<div class="aviso">Carboidratos acima de 65% do VET (acima da faixa da DRI de 45–65%).</div>' : ''}
       <h3>Hidratação e fibras</h3>
       <table><tbody>
         <tr><th>Água</th><td>${fmt(r.agua / 1000, 1)} L/dia <span class="medida">(${r.idade >= 65 ? 30 : 35} ml/kg)</span></td></tr>
@@ -706,8 +722,8 @@ function viewPlano(raiz) {
       <div class="cabecalho">
         <div><h1>Plano alimentar</h1><p class="subtitulo">${pac ? esc(pac.nome) : 'Sem paciente vinculado'} · ${dataBR(plano.data)}</p></div>
         <div class="acoes nao-imprimir">
-          <button class="btn" data-acao="salvar">💾 Salvar no paciente</button>
-          <button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button>
+          <button class="btn" data-acao="salvar">${icone('salvar')}Salvar no paciente</button>
+          <button class="btn btn-sec" data-imprimir>${icone('imprimir')}Imprimir</button>
           <button class="btn btn-perigo" data-acao="limpar">Novo / limpar</button>
         </div>
       </div>
@@ -731,9 +747,9 @@ function viewPlano(raiz) {
           <div class="campo"><label>Fibras (g)</label><input type="number" data-meta="f" value="${esc(meta.f)}"></div>
         </div>
         <div class="acoes" style="margin-top:12px">
-          ${pac ? '<button class="btn btn-sec btn-sm" data-acao="meta-paciente">Usar meta da última avaliação</button>' : ''}
+          ${pac ? '<button class="btn btn-sec" data-acao="meta-paciente">Usar meta da última avaliação</button>' : ''}
           <select id="sel-dieta" style="width:auto"><option value="">Carregar modelo de dieta…</option>${opcoes(DIETAS, '')}</select>
-          <button class="btn btn-sec btn-sm" data-acao="carregar-dieta">Carregar (ajustado à meta de kcal)</button>
+          <button class="btn btn-sec" data-acao="carregar-dieta">Carregar ajustado à meta</button>
         </div>
       </div>
 
@@ -758,7 +774,7 @@ function viewPlano(raiz) {
           <div class="refeicao-cab">
             <input data-ref-nome="${ri}" value="${esc(r.nome)}">
             <span class="medida">${fmt(t.kcal)} kcal · P ${fmt(t.p)} g · C ${fmt(t.c)} g · L ${fmt(t.l)} g</span>
-            <button class="btn-x" data-rem-ref="${ri}" title="Remover refeição">✕</button>
+            <button class="btn-x" data-rem-ref="${ri}" title="Remover refeição">${icone('lixeira')}</button>
           </div>
           ${r.itens.length ? `<div class="tabela-wrap"><table>
             <thead><tr><th>Alimento</th><th>Medida caseira</th><th class="num">Qtd (g)</th><th class="num">kcal</th><th class="num">P</th><th class="num">C</th><th class="num">L</th><th></th></tr></thead>
@@ -770,7 +786,7 @@ function viewPlano(raiz) {
                 <td class="medida">${esc(Nutri.medidaCaseira(it.id, it.g))}</td>
                 <td class="num"><input type="number" min="0" step="5" value="${it.g}" data-qtd="${ri}:${ii}"></td>
                 <td class="num">${fmt(n.kcal)}</td><td class="num">${fmt(n.p, 1)}</td><td class="num">${fmt(n.c, 1)}</td><td class="num">${fmt(n.l, 1)}</td>
-                <td class="num"><button class="btn-x" data-rem-item="${ri}:${ii}" title="Remover">✕</button></td>
+                <td class="num"><button class="btn-x" data-rem-item="${ri}:${ii}" title="Remover">${icone('fechar')}</button></td>
               </tr>`;
     }).join('')}</tbody></table></div>` : ''}
           <div class="add-item">
@@ -781,7 +797,7 @@ function viewPlano(raiz) {
         </div>`;
   }).join('')}
 
-      <div class="acoes nao-imprimir" style="margin-bottom:18px"><button class="btn btn-sec" data-acao="add-ref">➕ Adicionar refeição</button></div>
+      <div class="acoes nao-imprimir" style="margin-bottom:18px"><button class="btn btn-sec" data-acao="add-ref">${icone('mais')}Adicionar refeição</button></div>
 
       <div class="card">
         <h2>Orientações</h2>
@@ -905,7 +921,7 @@ function viewDietas(raiz) {
         <h2>${esc(d.nome)}</h2>
         <p>${esc(d.objetivo)}</p>
         ${barraMacros(d.macros)}
-        <span class="medida">Cardápio-base ≈ ${fmt(kcal)} kcal</span>
+        <div class="rodape"><span>Cardápio-base ≈ <strong>${fmt(kcal)} kcal</strong></span>${icone('seta')}</div>
       </a>`;
   }).join('')}</div>`;
 }
@@ -920,8 +936,8 @@ function viewDieta(raiz, id) {
     <div class="cabecalho">
       <div><h1>${esc(d.nome)}</h1><p class="subtitulo">${esc(d.objetivo)}</p></div>
       <div class="acoes nao-imprimir">
-        <button class="btn" id="usar">🍽️ Usar no plano alimentar</button>
-        <button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button>
+        <button class="btn" id="usar">${icone('plano')}Usar no plano alimentar</button>
+        <button class="btn btn-sec" data-imprimir>${icone('imprimir')}Imprimir</button>
       </div>
     </div>
     <div class="grid grid-2">
@@ -932,8 +948,8 @@ function viewDieta(raiz, id) {
       </div>
       <div class="card">
         <h2>Alimentos</h2>
-        <h3>✅ Preferir</h3><ul class="lista-simples">${d.preferir.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
-        <h3>⛔ Evitar / limitar</h3><ul class="lista-simples">${d.evitar.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
+        <h3>Preferir</h3><ul class="lista-simples">${d.preferir.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
+        <h3>Evitar ou limitar</h3><ul class="lista-simples evitar">${d.evitar.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
       </div>
     </div>
     <div class="card">
@@ -1009,11 +1025,11 @@ function viewReceitas(raiz) {
     $('#lista', raiz).innerHTML = lista.map((r) => {
       const n = Nutri.dividir(Nutri.somar(r.ingredientes), r.porcoes);
       return `<a class="card item-card" href="#/receita/${r.id}">
-        <span class="tag" style="align-self:flex-start">${esc(r.categoria)}</span>
+        <span class="tag marca" style="align-self:flex-start">${esc(r.categoria)}</span>
         <h2>${esc(r.nome)}</h2>
-        <p>⏱ ${r.tempo} min · 🍽 ${r.porcoes} porç${r.porcoes > 1 ? 'ões' : 'ão'}</p>
-        <p><strong>${fmt(n.kcal)} kcal</strong>/porção · P ${fmt(n.p)} g · C ${fmt(n.c)} g · L ${fmt(n.l)} g</p>
+        <div class="meta"><span>${icone('relogio')}${r.tempo} min</span><span>${icone('porcao')}${r.porcoes} porç${r.porcoes > 1 ? 'ões' : 'ão'}</span><span>${icone('fogo')}${fmt(n.kcal)} kcal/porção</span></div>
         <div class="tags">${r.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
+        <div class="rodape"><span>P ${fmt(n.p)} g · C ${fmt(n.c)} g · L ${fmt(n.l)} g</span>${icone('seta')}</div>
       </a>`;
     }).join('') || '<p class="vazio">Nenhuma receita encontrada.</p>';
   };
@@ -1032,8 +1048,8 @@ function viewReceita(raiz, id) {
 
   raiz.innerHTML = `
     <div class="cabecalho">
-      <div><h1>${esc(r.nome)}</h1><p class="subtitulo">${esc(r.categoria)} · ⏱ ${r.tempo} min · rende ${r.porcoes} porç${r.porcoes > 1 ? 'ões' : 'ão'} (≈ ${fmt(pesoTotal / r.porcoes)} g cada, peso cru)</p></div>
-      <div class="acoes nao-imprimir"><a class="btn btn-sec" href="#/receitas">← Receitas</a><button class="btn btn-sec" data-imprimir>🖨️ Imprimir</button></div>
+      <div><h1>${esc(r.nome)}</h1><p class="subtitulo">${esc(r.categoria)} · ${r.tempo} min de preparo · rende ${r.porcoes} porç${r.porcoes > 1 ? 'ões' : 'ão'} (≈ ${fmt(pesoTotal / r.porcoes)} g cada, peso cru)</p></div>
+      <div class="acoes nao-imprimir"><a class="btn btn-sec" href="#/receitas">${icone('voltar')}Receitas</a><button class="btn btn-sec" data-imprimir>${icone('imprimir')}Imprimir</button></div>
     </div>
     <div class="grid grid-2">
       <div class="card">
@@ -1145,19 +1161,40 @@ function importar(arquivo) {
 /* ============================================================
  * Login e solicitação de acesso
  * ============================================================ */
-const cabecalhoAuth = (titulo) => `<div class="logo-auth"><span>🥗</span><h1>Nutris</h1><p class="subtitulo" style="margin:4px 0 0">${titulo}</p></div>`;
+/** Layout de duas colunas: painel da marca à esquerda e formulário à direita. */
+const layoutAuth = (titulo, subtitulo, conteudo) => `
+  <section class="auth-marca">
+    <div class="marca">${LOGO_SVG}<div><strong>Nutris</strong></div></div>
+    <div style="position:relative;z-index:1">
+      <h2>Gestão nutricional completa para a sua clínica.</h2>
+      <p>Avaliação, prescrição e acompanhamento dos pacientes em um só lugar, com cálculos validados e acesso seguro para toda a equipe.</p>
+      <ul class="auth-recursos">
+        <li>${icone('check')}Antropometria, dobras cutâneas e gasto energético</li>
+        <li>${icone('check')}Planos alimentares com cálculo automático de macros</li>
+        <li>${icone('check')}Modelos de dieta, receitas e tabela de alimentos</li>
+        <li>${icone('check')}Prontuário compartilhado e controle de acesso</li>
+      </ul>
+    </div>
+    <div class="auth-rodape">© ${new Date().getFullYear()} Nutris · Dados protegidos conforme a LGPD</div>
+  </section>
+  <section class="auth-form">
+    <div class="auth-card">
+      <div class="marca">${LOGO_SVG}<div><strong>Nutris</strong><small>Clínica de Nutrição</small></div></div>
+      <h1>${titulo}</h1>
+      <p class="subtitulo">${subtitulo}</p>
+      ${conteudo}
+    </div>
+  </section>`;
 
 function viewLogin(raiz) {
-  raiz.innerHTML = `<div class="card">
-    ${cabecalhoAuth('Acesso da equipe da clínica')}
+  raiz.innerHTML = layoutAuth('Entrar', 'Acesse com o e-mail e a senha da sua conta.', `
     <form id="form" novalidate>
       <div id="erro" class="erro-form" hidden></div>
       <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
       <div class="campo"><label for="senha">Senha</label><input id="senha" name="senha" type="password" autocomplete="current-password" required></div>
       <button class="btn" type="submit">Entrar</button>
     </form>
-    <p class="alternar">Ainda não tem acesso? <a href="#/cadastro">Solicitar cadastro</a></p>
-  </div>`;
+    <p class="alternar">Ainda não tem acesso? <a href="#/cadastro">Solicitar cadastro</a></p>`);
 
   $('#form', raiz).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1178,8 +1215,7 @@ function viewLogin(raiz) {
 }
 
 function viewCadastro(raiz) {
-  raiz.innerHTML = `<div class="card">
-    ${cabecalhoAuth('Solicitar acesso ao sistema')}
+  raiz.innerHTML = layoutAuth('Solicitar acesso', 'Preencha seus dados. O administrador da clínica vai analisar e liberar o seu acesso.', `
     <div id="conteudo">
       <form id="form" novalidate>
         <div id="erro" class="erro-form" hidden></div>
@@ -1189,11 +1225,9 @@ function viewCadastro(raiz) {
         <div class="campo"><label for="senha">Senha (mín. 8 caracteres)</label><input id="senha" name="senha" type="password" autocomplete="new-password" minlength="8" required></div>
         <div class="campo"><label for="senha2">Confirmar senha</label><input id="senha2" name="senha2" type="password" autocomplete="new-password" required></div>
         <button class="btn" type="submit">Enviar solicitação</button>
-        <p class="ajuda" style="margin:0">Seu acesso será liberado após a aprovação do administrador da clínica.</p>
       </form>
     </div>
-    <p class="alternar"><a href="#/login">← Voltar para o login</a></p>
-  </div>`;
+    <p class="alternar">Já tem acesso? <a href="#/login">Entrar</a></p>`);
 
   $('#form', raiz).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1208,7 +1242,7 @@ function viewCadastro(raiz) {
     try {
       const { senha2, ...corpo } = d;
       const r = await Api.post('/api/auth/cadastro', corpo);
-      $('#conteudo', raiz).innerHTML = `<div class="info">✅ ${esc(r.mensagem)}</div>`;
+      $('#conteudo', raiz).innerHTML = `<div class="info sucesso">${esc(r.mensagem)}</div>`;
     } catch (err) {
       mostrar(err.message);
       btn.disabled = false;
@@ -1247,8 +1281,8 @@ async function viewUsuarios(raiz) {
     const lista = [];
     if (u.status === 'aprovado') {
       lista.push(u.papel === 'admin' ? b('nutricionista', 'Remover admin') : b('admin', 'Tornar admin'));
-      lista.push(b('senha', 'Redefinir senha'));
-      lista.push(b('bloqueado', 'Bloquear', 'btn-perigo'));
+      lista.push(b('senha', `${icone('chave')}Redefinir senha`));
+      lista.push(b('bloqueado', `${icone('bloquear')}Bloquear`, 'btn-perigo'));
     } else {
       lista.push(b('aprovado', u.status === 'bloqueado' ? 'Reativar' : 'Aprovar', u.status === 'bloqueado' ? 'btn-sec' : ''));
     }
@@ -1266,8 +1300,8 @@ async function viewUsuarios(raiz) {
         <tbody>${pendentes.map((u) => `<tr>
           <td><strong>${esc(u.nome)}</strong></td><td>${esc(u.email)}</td><td>${esc(u.crn || '—')}</td><td>${dataHoraBR(u.criadoEm)}</td>
           <td class="num"><div class="acoes" style="justify-content:flex-end">
-            <button class="btn btn-sm" data-acao="aprovado" data-id="${u.id}">✓ Aprovar</button>
-            <button class="btn btn-perigo btn-sm" data-acao="rejeitado" data-id="${u.id}">✕ Rejeitar</button>
+            <button class="btn btn-sm" data-acao="aprovado" data-id="${u.id}">${icone('check')}Aprovar</button>
+            <button class="btn btn-perigo btn-sm" data-acao="rejeitado" data-id="${u.id}">${icone('fechar')}Rejeitar</button>
           </div></td></tr>`).join('')}</tbody></table></div>` : '<p class="vazio">Nenhuma solicitação aguardando aprovação.</p>'}
     </div>
 
@@ -1353,6 +1387,7 @@ function atualizarSidebar() {
   const u = Store.usuario;
   if (!u) return;
   $('#usuario-nome').textContent = u.nome;
+  $('#usuario-avatar').textContent = iniciais(u.nome);
   $('#usuario-papel').textContent = u.papel === 'admin' ? 'Administrador' : 'Nutricionista';
   $('#menu-usuarios').hidden = u.papel !== 'admin';
   $('#backup-admin').hidden = u.papel !== 'admin';
@@ -1393,6 +1428,10 @@ async function iniciar() {
   $('#btn-exportar').onclick = exportar;
   $('#input-importar').onchange = (e) => { if (e.target.files[0]) importar(e.target.files[0]); e.target.value = ''; };
   $('#btn-sair').onclick = sair;
+  // Menu lateral deslizante no celular
+  $('#btn-menu').onclick = () => document.body.classList.toggle('menu-aberto');
+  $('#sidebar-fundo').onclick = () => document.body.classList.remove('menu-aberto');
+  window.addEventListener('hashchange', () => document.body.classList.remove('menu-aberto'));
   try {
     await entrar(await Api.get('/api/auth/me'));
   } catch {

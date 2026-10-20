@@ -3,49 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Nutris — Clínica de Nutrição</title>
+  <meta name="theme-color" content="#0f766e">
+  <title>Nutris — Gestão para Clínicas de Nutrição</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="logo">
-      <span class="logo-icone">🥗</span>
+  <header class="topbar-movel">
+    <button class="btn-icone" id="btn-menu" aria-label="Abrir menu"><span data-icone="menu"></span></button>
+    <div class="marca"><span data-logo></span><strong>Nutris</strong></div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="marca">
+      <span data-logo></span>
       <div>
         <strong>Nutris</strong>
         <small>Clínica de Nutrição</small>
       </div>
     </div>
+
     <nav id="menu">
-      <a href="#/" data-rota="inicio">🏠 Início</a>
-      <a href="#/pacientes" data-rota="pacientes">👥 Pacientes</a>
-      <a href="#/avaliacao" data-rota="avaliacao">📏 Avaliação e cálculos</a>
-      <a href="#/plano" data-rota="plano">🍽️ Plano alimentar</a>
-      <a href="#/dietas" data-rota="dietas">📋 Modelos de dieta</a>
-      <a href="#/receitas" data-rota="receitas">🍳 Receitas</a>
-      <a href="#/alimentos" data-rota="alimentos">🥕 Tabela de alimentos</a>
-      <a href="#/usuarios" data-rota="usuarios" id="menu-usuarios" hidden>🔐 Usuários <span class="badge" id="badge-pendentes" hidden></span></a>
-    </nav>
-    <div class="sidebar-rodape">
-      <div class="usuario-box">
-        <strong id="usuario-nome"></strong>
-        <small id="usuario-papel"></small>
-      </div>
-      <a class="btn btn-claro btn-sm" href="#/conta">⚙ Minha conta</a>
-      <div id="backup-admin" class="sidebar-rodape-grupo" hidden>
-        <button class="btn btn-claro btn-sm" id="btn-exportar">⬇ Exportar backup</button>
-        <label class="btn btn-claro btn-sm">
-          ⬆ Importar backup
+      <div class="menu-secao">Atendimento</div>
+      <a href="#/" data-rota="inicio"><span data-icone="inicio"></span>Início</a>
+      <a href="#/pacientes" data-rota="pacientes"><span data-icone="pacientes"></span>Pacientes</a>
+      <a href="#/avaliacao" data-rota="avaliacao"><span data-icone="avaliacao"></span>Avaliação e cálculos</a>
+      <a href="#/plano" data-rota="plano"><span data-icone="plano"></span>Plano alimentar</a>
+
+      <div class="menu-secao">Biblioteca</div>
+      <a href="#/dietas" data-rota="dietas"><span data-icone="dietas"></span>Modelos de dieta</a>
+      <a href="#/receitas" data-rota="receitas"><span data-icone="receitas"></span>Receitas</a>
+      <a href="#/alimentos" data-rota="alimentos"><span data-icone="alimentos"></span>Tabela de alimentos</a>
+
+      <div id="backup-admin" hidden>
+        <div class="menu-secao">Administração</div>
+        <a href="#/usuarios" data-rota="usuarios" id="menu-usuarios" hidden><span data-icone="usuarios"></span>Usuários<span class="badge" id="badge-pendentes" hidden></span></a>
+        <button class="menu-botao" id="btn-exportar"><span data-icone="exportar"></span>Exportar backup</button>
+        <label class="menu-botao">
+          <span data-icone="importar"></span>Importar backup
           <input type="file" id="input-importar" accept="application/json" hidden>
         </label>
       </div>
-      <button class="btn btn-claro btn-sm" id="btn-sair">↩ Sair</button>
+    </nav>
+
+    <div class="usuario-card">
+      <div class="avatar" id="usuario-avatar"></div>
+      <div class="usuario-info">
+        <strong id="usuario-nome"></strong>
+        <small id="usuario-papel"></small>
+      </div>
+      <a class="btn-icone" href="#/conta" title="Minha conta" aria-label="Minha conta"><span data-icone="conta"></span></a>
+      <button class="btn-icone" id="btn-sair" title="Sair" aria-label="Sair"><span data-icone="sair"></span></button>
     </div>
   </aside>
+  <div class="sidebar-fundo" id="sidebar-fundo"></div>
 
   <main id="app"><p class="vazio">Carregando…</p></main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="js/icones.js"></script>
   <script src="js/calculos.js"></script>
   <script src="js/dados.js"></script>
   <script src="js/app.js"></script>
